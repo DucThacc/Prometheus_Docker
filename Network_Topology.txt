@@ -1,0 +1,295 @@
+## 🌐 Mô hình hệ thống (Network Topology)
+
+Hệ thống được xây dựng trên GNS3 mô phỏng mô hình mạng doanh nghiệp thực tế sử dụng kỹ thuật **Router-on-a-Stick**.
+
+### Thành phần thiết bị:
+* **Router (R1 - C7200):** Đóng vai trò Gateway trung tâm, thực hiện định tuyến giữa các VLAN và NAT để ra Internet.
+    * `g1/0`: Kết nối Cloud (Internet/NAT).
+    * `g2/0`: Kết nối Trunking xuống Core Switch.
+* **Core Switch (IOU1 - L2):** Kết nối chính, phân phối dữ liệu cho các nhánh.
+    * `e0/0`: Trunking lên R1.
+    * `e0/3`: Trunking sang IOU2.
+    * `e0/1, e0/2`: Access port cho **VLAN 10**.
+* **Access Switch (IOU2 - L2):** Mở rộng mạng cho các phòng ban khác.
+    * `e0/0`: Trunking về IOU1.
+    * `e1/0, e1/1`: Access port cho **VLAN 20**.
+
+### Quy hoạch IP:
+* **VLAN 10:** 192.168.10.0/24 (Phòng ban 1). Gateway: 192.168.10.1.
+* **VLAN 20:** 192.168.20.0/24 (Phòng ban 2). Gateway: 192.168.20.1.
+* **Quản lý (SNMP):** Tất cả thiết bị chạy SNMP Community `public` (Read-Only) để giám sát.
+
+Thiết bị,           Loại (Platform),            Địa chỉ IP (Target),        Vai trò
+Router R1,          Cisco 7200 (IOS),           192.168.240.240,            "Gateway, NAT, Routing"
+Core SW (IOU1),     Cisco IOL L2,               192.168.10.2,               Quản lý VLAN 10
+Access SW (IOU2),   Cisco IOL L2,               192.168.20.2,               Quản lý VLAN 20
+
+🌐 SƠ ĐỒ MÔ HÌNH MẠNG TỔNG THỂ
+Mô hình: Internet (NAT/Cloud) <---> R1 <---(Trunk)---> IOU1 <---(Trunk)---> IOU2
+
+R1 (C7200): Cổng g1/0 ra Internet, Cổng g2/0 nối xuống Switch.
+
+IOU1 (L2 Switch): Cổng e0/0 lên Router, e0/3 sang IOU2, e0/1-2 cho VLAN 10.
+
+IOU2 (L2 Switch): Cổng e0/0 về IOU1, e1/0-1 cho VLAN 20.
+
+🛠 BỘ LỆNH CẤU HÌNH CHI TIẾT (COPY & PASTE)
+1. Cấu hình Router R1 (Định tuyến & NAT)
+Code snippet
+enable
+conf t
+hostname R1
+
+# Cổng ra Internet (Cloud/NAT)
+interface g1/0
+ ip address dhcp
+ ip nat outside
+ duplex full
+ speed 100
+ no shut
+
+# Cấu hình Sub-interface cho VLAN 10 & 20
+interface g2/0
+ no shut
+ duplex full
+ speed 100
+
+interface g2/0.10
+ encapsulation dot1Q 10
+ ip address 192.168.10.1 255.255.255.0
+ ip nat inside
+
+interface g2/0.20
+ encapsulation dot1Q 20
+ ip address 192.168.20.1 255.255.255.0
+ ip nat inside
+
+# Cấu hình NAT & SNMP
+access-list 1 permit 192.168.0.0 0.0.255.255
+ip nat inside source list 1 interface g1/0 overload
+snmp-server community public RO
+exit
+wr
+2. Cấu hình Switch IOU1 (Core Switch)
+
+enable
+conf t
+hostname IOU1
+vlan 10
+vlan 20
+exit
+
+# Trunk lên Router
+interface e0/0
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ duplex full
+ speed 100
+
+# Trunk sang Switch IOU2
+interface e0/3
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+
+# Cổng Access cho PC (VLAN 10)
+interface range e0/1 - 2
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+
+# SNMP Giám sát
+snmp-server community public RO
+exit
+wr
+3. Cấu hình Switch IOU2 (Access Switch)
+
+enable
+conf t
+hostname IOU2
+vlan 10
+vlan 20
+exit
+
+# Trunk về IOU1
+interface e0/0
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+
+# Cổng Access cho PC (VLAN 20)
+interface range e1/0 - 1
+ switchport mode access
+ switchport access vlan 20
+ spanning-tree portfast
+
+# SNMP Giám sát
+snmp-server community public RO
+exit
+wr
+4. Cấu hình PC (VPCS)
+Mở Console từng máy và gõ:
+
+PC1: ip 192.168.10.10 192.168.10.1 24 -> save
+PC2: ip 192.168.10.11 192.168.10.1 24 -> save
+
+PC3: ip 192.168.20.10 192.168.20.1 24 -> save
+PC4: ip 192.168.20.11 192.168.20.1 24 -> save
+
+🔍 CÁC LỆNH KIỂM TRA "SỐNG CÒN"
+Sau khi nhập xong, ní dùng các lệnh này để check xem mạng có "khỏe" không:
+
+Kiểm tra Trunk: show interfaces trunk (Phải thấy status là trunking).
+
+Kiểm tra VLAN: show vlan brief (Cổng đã gán đúng VLAN chưa).
+
+Kiểm tra NAT: show ip nat translations (Khi PC ping ra ngoài, bảng này phải nhảy số).
+
+Kiểm tra SNMP: show snmp community (Để đảm bảo Prometheus sau này có thể kết nối).
+
+ 1. Sơ đồ đấu nối và Phân bổ IP
+Router (R1):
+
+g1/0 (Gigabit): Nối vào Cloud (Nhận IP DHCP từ mạng thật).
+
+g2/0 (Gigabit): Nối xuống IOU1 (Cổng e0/0). Đây là đường Sub-interface cho các VLAN.
+
+Switch Layer 3 (IOU1):
+
+e0/0: Nối lên R1.
+
+e0/1: Nối xuống PC1 (VLAN 10).
+
+e0/2: Nối xuống PC2 (VLAN 10).
+
+e0/3: Nối sang IOU2 (Cổng e0/0).
+
+Switch Layer 3 (IOU2):
+
+e0/0: Nối sang IOU1.
+
+e1/0: Nối xuống PC3 (VLAN 20).
+
+e1/1: Nối xuống PC4 (VLAN 20).
+
+Quy hoạch IP:
+
+VLAN 10: 192.168.10.0/24 (Gateway: 192.168.10.1)
+
+VLAN 20: 192.168.20.0/24 (Gateway: 192.168.20.1)
+
+2. Cấu hình chi tiết (Copy & Paste)
+A. Cấu hình Router (R1)
+Làm nhiệm vụ định tuyến giữa các VLAN và cấp Internet (NAT).
+
+Code snippet
+enable
+configure terminal
+hostname R1
+
+# Cấu hình cổng ra Internet (Cloud)
+interface g1/0
+ ip address dhcp
+ ip nat outside
+ no shutdown
+
+# Cấu hình Sub-interfaces cho VLAN 10
+interface g2/0.10
+ encapsulation dot1Q 10
+ ip address 192.168.10.1 255.255.255.0
+ ip nat inside
+
+# Cấu hình Sub-interfaces cho VLAN 20
+interface g2/0.20
+ encapsulation dot1Q 20
+ ip address 192.168.20.1 255.255.255.0
+ ip nat inside
+
+interface g2/0
+ no shutdown
+
+# Cấu hình NAT Overload để các máy ra được Internet
+access-list 1 permit 192.168.0.0 0.0.255.255
+ip nat inside source list 1 interface g1/0 overload
+
+# Cấu hình SNMP để Prometheus giám sát
+snmp-server community public RO
+exit
+wr
+B. Cấu hình Switch IOU1
+Làm nhiệm vụ chuyển mạch và dẫn đường truyền (Trunking).
+
+Code snippet
+enable
+configure terminal
+hostname IOU1
+
+# Tạo VLAN
+vlan 10
+vlan 20
+exit
+
+# Cổng nối lên Router (Trunk)
+interface e0/0
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+
+# Cổng nối xuống PC1, PC2 (VLAN 10)
+interface range e0/1 - 2
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+
+# Cổng nối sang IOU2 (Trunk)
+interface e0/3
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+
+# Cấu hình SNMP
+snmp-server community public RO
+exit
+wr
+C. Cấu hình Switch IOU2
+Code snippet
+enable
+configure terminal
+hostname IOU2
+
+vlan 10
+vlan 20
+exit
+
+# Cổng nối sang IOU1 (Trunk)
+interface e0/0
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+
+# Cổng nối xuống PC3, PC4 (VLAN 20)
+interface range e1/0 - 1
+ switchport mode access
+ switchport access vlan 20
+ spanning-tree portfast
+
+# Cấu hình SNMP
+snmp-server community public RO
+exit
+wr
+D. Cấu hình các máy PC (VPCS)
+Mở cửa sổ console của từng PC và nhập lệnh:
+
+PC1: ip 192.168.10.10 192.168.10.1 24
+
+PC2: ip 192.168.10.11 192.168.10.1 24
+
+PC3: ip 192.168.20.10 192.168.20.1 24
+
+PC4: ip 192.168.20.11 192.168.20.1 24
+(Sau đó gõ lệnh save để không bị mất cấu hình khi tắt GNS3).
+
+3. Kiểm tra (Testing)
+Từ PC1, gõ: ping 192.168.20.10 (Kiểm tra thông giữa 2 VLAN).
+
+Từ PC1, gõ: ping 8.8.8.8 (Kiểm tra ra Internet qua NAT).
+
+Từ R1, gõ: show snmp community để xác nhận SNMP đã chạy.
+
+Lưu ý cho Prometheus: Khi cấu hình file prometheus.yml, bạn hãy dùng địa chỉ IP mà R1 nhận được từ Cloud (gõ show ip int br trên R1 để xem) làm địa chỉ đích để lấy dữ liệu SNMP.
+

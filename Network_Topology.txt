@@ -20,7 +20,7 @@ Hệ thống được xây dựng trên GNS3 mô phỏng mô hình mạng doanh 
 * **Quản lý (SNMP):** Tất cả thiết bị chạy SNMP Community `public` (Read-Only) để giám sát.
 
 Thiết bị,           Loại (Platform),            Địa chỉ IP (Target),        Vai trò
-Router R1,          Cisco 7200 (IOS),           192.168.240.240,            "Gateway, NAT, Routing"
+Router R1,          Cisco 7200 (IOS),           192.168.10.1,            "Gateway, NAT, Routing"
 Core SW (IOU1),     Cisco IOL L2,               192.168.10.2,               Quản lý VLAN 10
 Access SW (IOU2),   Cisco IOL L2,               192.168.20.2,               Quản lý VLAN 20
 
